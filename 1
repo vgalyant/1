@@ -1,0 +1,833 @@
+<?php
+
+//error_reporting(E_ALL);
+//ini_set('display_errors', 'On');
+
+
+/****************************************************************
+	Функции мониторинга
+	так как связывание идентификаторов заббикса с идентификаторами 
+	в моей базе себя не оправдало, 	а также вызвало кучу проблем 
+	с синхронизацией, связываем через IP-адреса.
+	В для связи с заббиксом используем наименьший из присвоенных
+	устройству ip-адресов
+	И еще: теперь никакого добавления в заббикс из интерфейса, 
+	пусть этим занимаются скрипты синхронизации.
+ *****************************************************************/
+class jsonrpc{    
+    
+    protected function connect($server, $query){
+        $http = curl_init($server);
+        curl_setopt($http, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($http, CURLOPT_POSTFIELDS, $query);    
+        curl_setopt($http, CURLOPT_RETURNTRANSFER, TRUE);
+        curl_setopt($http, CURLOPT_SSL_VERIFYPEER, FALSE);
+//        curl_setopt($http, CURLOPT_PROXY, 'proxy_url');
+//        curl_setopt($http, CURLOPT_PROXYPORT, '3128');
+//        curl_setopt($http, CURLOPT_PROXYUSERPWD, 'login:pass');
+        curl_setopt($http, CURLOPT_SSL_VERIFYHOST, FALSE); 
+        curl_setopt($http, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        $response = curl_exec($http);
+        return json_decode($response, true);
+        curl_close($http);
+    }
+    
+}
+
+
+class zbx extends jsonrpc{
+
+    public $method;
+    public $access_token;
+    public $url;
+    public $query;
+
+    function call(){
+        $data['jsonrpc'] = '2.0';
+        $data['method'] = $this->method;
+        $data['params'] = $this->query;
+        $this->query = '';
+        if(!empty($this->access_token)) $data['auth'] = $this->access_token;     
+        $data['id'] = rand(1,100);
+        $data = json_encode($data, JSON_PRETTY_PRINT);
+        return $this->connect($this->url, $data);
+    }
+        
+}
+
+
+
+
+
+function format_time_diff($time)
+{
+	//переводит интервал в секундах в удобочитаемый вид
+	$seconds = abs($time);
+	//пляшем от дней
+	$msg = "";
+	//$days = floor($seconds/86400);
+	if ($days = floor($seconds / 86400)) {
+		$seconds = $seconds - $days * 86400;
+		$msg .= $days . "д. ";
+	}
+	//$hours = floor($seconds/3600);
+	if ($hours = floor($seconds / 3600)) {
+		$seconds = $seconds - $hours * 3600;
+		$msg .= $hours . "ч. ";
+	}
+	//$minutes = floor($seconds/60);
+	if ($minutes = floor($seconds / 60)) {
+		$seconds = $seconds - $minutes * 60;
+		$msg .= $minutes . "мин. ";
+	}
+	if (empty($msg)) $msg .= $seconds . "сек. ";
+	//$msg .= $seconds."с. "; // да нахер нужна такая точность, время реакции все равно от нескольких часов до нескольких дней
+	return $msg;
+}
+
+function getZabbixIdForDevice($dev_id)
+{
+	global $dbnewzab;
+	try{
+	if ($ip = deviceGetIPs($dev_id)[0]) {
+		$hostid = $dbnewzab->query("select hostid from interface where ip='$ip';");
+	
+		return $hostid->fetch()['hostid'];
+	}
+} catch (Exception $e) { 
+	echo "<script>console.log('Debug Objects: " . $e . "' );</script>";
+}
+	return false;
+}
+
+function getDevIdForZabbixHost($hostid)
+{
+	global $dbzab;
+	$ip = $dbzab->prepare("select ip from interface where hostid=?;");
+	$ip->execute(array($hostid));
+	return deviceGetByIP($hostid->fetch()['ip']);
+}
+
+function getZabbixIdByIP($ip)
+{
+	global $dbzab;
+	$hostid = $dbzab->prepare("select hostid from interface where ip=?;");
+	$hostid->execute(array($ip));
+	return $hostid->fetch()['hostid'];
+}
+
+function getHistoryForDevice($dev_id, $count = 0)
+{
+	//$count  - желаемое количество записей.
+	//флаги состояний:
+	//0 - ок
+	//1 - проблема
+	//2 - неизвестно
+	global $dbzab;
+	if ($hostid = getZabbixIdForDevice($dev_id)) {
+		$history_raw = $dbzab->prepare("SELECT 
+											clock, FROM_UNIXTIME(clock) time, 
+											events.value value
+										from 
+											items 
+											join functions using (itemid) 
+											join events on objectid = functions.triggerid
+											join triggers using (triggerid)
+										where 
+											triggers.templateid IN (77832, 10564, 10564, 10564)
+											hostid = ? 
+										order by 
+											events.clock desc;");
+		$history_raw->execute(array($hostid));
+		$history = array();
+		while ($event = $history_raw->fetch()) {
+			if ($event['value'] != 0) {
+				if (isset($etime)) {
+					$history[] = array(
+						'event' => ($event['value'] == 1) ? "Отключение" : "Неизвестно",
+						'end_time' => $etime,
+						'begin_time' => $event['time'],
+						'event_time' => format_time_diff($eclock - $event['clock']),
+						'event_sec' => $eclock - $event['clock']
+					);
+				}
+			} else {
+				$etime = $event['time'];
+				$eclock = $event['clock'];
+			}
+		}
+	}
+	if (count($history) > 0) return $history;
+	return false;
+}
+
+
+function getCurrentState($dev_id)
+{
+	
+	if ($hostid = getZabbixIdForDevice($dev_id))
+		return getZabbixCurrentState($hostid);
+	return false;
+}
+
+//функция сортировки по длительности ивента
+function time_sort($a, $b)
+{
+	if ($a['event_sec'] == $b['event_sec']) {
+		//if ($a['ip'] == $b['ip']) return 0; // да быть такого не может
+		return ($a['ip'] > $b['ip']) ? 1 : -1; // сортировка по ip-адресу, если длительности ивентов равны
+	}
+	return ($a['event_sec'] > $b['event_sec']) ? -1 : 1;
+}
+
+// это замена функциям getBroken() и highpingGet()
+function getHostsByTrigger($template_id)
+{
+	global $dbzab, $dbspd, $dblb;
+	$template_id = intval($template_id);
+
+	$brokens = $dbzab->query("(SELECT lastchange, 
+								EXTRACT(EPOCH FROM now()) - lastchange AS event_sec, hosts.hostid,
+										ip, hosts.name name
+								FROM 
+									triggers
+									join functions using (triggerid)
+									join items using (itemid)
+									join interface using (hostid)
+									join hosts using (hostid)
+								where 
+									value=1 
+									and (UNIX_TIMESTAMP(now()) - lastchange) < 8640000
+									and triggers.templateid=$template_id
+									and hosts.status=0
+									and (ip like '10.220.186.%'
+									or ip like '10.220.187.%' 
+									or ip like '10.220.188.%' 
+									or ip like '10.220.189.%' 
+									or ip like '10.220.190.%')
+								group by ip
+								order by lastchange
+								limit 500 )
+								UNION ALL
+								(SELECT lastchange, (UNIX_TIMESTAMP(now()) - lastchange) event_sec, hosts.hostid,
+										ip, hosts.name name
+								FROM 
+									triggers
+									join functions using (triggerid)
+									join items using (itemid)
+									join interface using (hostid)
+									join hosts using (hostid)
+								where 
+									value=1 
+									and (UNIX_TIMESTAMP(now()) - lastchange) < 8640000
+									and triggers.templateid=$template_id
+									and hosts.status=0
+									and ip not like '10.220.186.%'
+									and ip not like '10.220.187.%' 
+									and ip not like '10.220.188.%' 
+									AND ip not like '10.220.189.%' 
+									AND ip not like '10.220.190.%'
+								group by ip
+								order by lastchange 
+								limit 500)
+								;");
+	$result = array();
+	//$count_brokens = count($brokens->fetchAll());
+	$brokens = $brokens->fetchAll();
+	// while ($broken = $brokens->fetch()) {
+	foreach ($brokens as $broken) {
+		//if ($broken['ip'] && count($brokens)<100) {
+		if ($dev_id = deviceGetByIP($broken['ip'])) {
+			if (count($brokens) < 175) {
+				$device_data = deviceGetData($dev_id);
+				$device_addr = deviceGetAddr($dev_id);
+				$comment_text = '';
+				$comment_date = '';
+				$color = 'cc0000';
+
+				// подсмотреть последний коммент
+				$comment = $dbspd->query("select 
+											date_format(insdate, '%d.%m.%Y %H:%i:') f_insdate, comment 
+										from spd_comments 
+										where 
+											comment_type = 'device' 
+											and obj_id=$dev_id 
+											and UNIX_TIMESTAMP(insdate) > $broken[lastchange] 
+										order by insdate desc limit 1;");
+				list($comment_date, $comment_text) = $comment->fetch();
+				//количество пострадавших
+				if ($dblb) {
+					$hurts = $dblb->query("SELECT count(vg_id) cnt
+											from 
+												ports 
+												join devices using (device_id) 
+											where 
+												device_name='$broken[ip]' 
+												and vg_id is not null;");
+					$hurts = $hurts->fetch()['cnt'];
+				} else $hurts = 0;
+				$special_hurts = $dbspd->query("SELECT count(port_id) cnt
+												from spd_devices_ports ports
+												join spd_specials_points specials using (port_id)
+												where 
+												dev_id=$dev_id
+												and ports.closedate is null
+												AND specials.closedate IS null;");
+				$special_hurts = $special_hurts->fetch()['cnt'];
+			} else {
+				$device_addr = $broken['name'];
+			}
+
+
+			// градиентный переход от серого к красному
+			switch (true) {
+				case ($broken['event_sec'] < 1800):
+					$color = 'DBDBDB';
+					break; // полчасика
+				case ($broken['event_sec'] < 7200):
+					$color = 'D6F6FF';
+					break; // пару часиков
+				case ($broken['event_sec'] < 21600):
+					$color = 'FFF6A5';
+					break; // шесть
+				case ($broken['event_sec'] < 43200):
+					$color = 'FFDC89';
+					break; // двенадцать
+				case ($broken['event_sec'] < 64800):
+					$color = 'FFB689';
+					break; // восемнадцать
+				case ($broken['event_sec'] < 86400):
+					$color = 'FF9999';
+					break; // более суток
+				default:
+					$color = 'FF8989';
+			}
+
+			 $is_important = $dbspd->query("SELECT * 
+			 //									from spd_group_links 
+			 //								where 
+			 //									group_id in (7,32,39,40,41)
+			 //									and dev_id=$dev_id  
+			 //									and closedate is null;");
+			
+
+
+			$result[] = array(
+				'dev_id' => $dev_id,
+				//'is_important' => ($is_important->rowCount() > 0) ? true : false,
+				'ip' => $broken['ip'],
+				'hostname' => $device_data['hostname'],
+				'addr' => $device_addr,
+				'last_comment_date' => $comment_date,
+				'last_comment_text' => $comment_text,
+				'event_time' => format_time_diff($broken['event_sec']),
+				'color' => $color,
+				'hurts' => $hurts,
+				'special_hurts' => $special_hurts,
+				'event_sec' => $broken['event_sec']
+			);
+		} else {
+
+			switch (true) {
+				case ($broken['event_sec'] < 1800):
+					$color = 'DBDBDB';
+					break; // полчасика
+				case ($broken['event_sec'] < 7200):
+					$color = 'D6F6FF';
+					break; // пару часиков
+				case ($broken['event_sec'] < 21600):
+					$color = 'FFF6A5';
+					break; // шесть
+				case ($broken['event_sec'] < 43200):
+					$color = 'FFDC89';
+					break; // двенадцать
+				case ($broken['event_sec'] < 64800):
+					$color = 'FFB689';
+					break; // восемнадцать
+				case ($broken['event_sec'] < 86400):
+					$color = 'FF9999';
+					break; // более суток
+				default:
+					$color = 'FF8989';
+			}
+
+			$result[] = array(
+				'host' => $broken['name'],
+				'hostid' => $broken['hostid'],
+				'ip' => $broken['ip'],
+				'color' => $color,
+				'event_time' => format_time_diff($broken['event_sec']),
+				'event_sec' => $broken['event_sec']
+			);
+		}
+	}
+	if (count($result) > 0) return $result;
+	return false;
+}
+
+function getICMPTriggers()
+{
+	global $dbnewzab, $dbspd, $dblb;
+	$template_id = "23"; // Get from trigger table 
+// 	Add time filter AND EXTRACT(EPOCH FROM now()) - lastchange < 2592000 
+	$brokens = $dbnewzab->query("
+				(SELECT lastchange, 
+				EXTRACT(EPOCH FROM now()) - lastchange AS event_sec, 
+				hosts.hostid, 
+				ip, 
+				hosts.name AS name
+		FROM triggers
+		JOIN functions USING (triggerid)
+		JOIN items USING (itemid)
+		JOIN interface USING (hostid)
+		JOIN hosts USING (hostid)
+		WHERE value = 1 
+		   AND triggers.templateid = ANY(ARRAY[$template_id])
+		   AND hosts.status = 0
+		GROUP BY ip, lastchange, hosts.hostid, hosts.name
+		ORDER BY lastchange)
+		");
+	$result = array();
+	//$count_brokens = count($brokens->fetchAll());
+	$brokens = $brokens->fetchAll();
+	// while ($broken = $brokens->fetch()) {
+	foreach ($brokens as $broken) {
+		//if ($broken['ip'] && count($brokens)<100) {
+		if ($dev_id = deviceGetByIP($broken['ip'])) {
+			if (count($brokens) < 175) {
+				$device_data = deviceGetData($dev_id);
+				$device_addr = deviceGetAddr($dev_id);
+				$comment_text = '';
+				$comment_date = '';
+				$color = 'cc0000';
+
+				// подсмотреть последний коммент
+				$comment = $dbspd->query("select 
+											date_format(insdate, '%d.%m.%Y %H:%i:') f_insdate, comment 
+										from spd_comments 
+										where 
+											comment_type = 'device' 
+											and obj_id=$dev_id 
+											and UNIX_TIMESTAMP(insdate) > $broken[lastchange] 
+										order by insdate desc limit 1;");
+				list($comment_date, $comment_text) = $comment->fetch();
+				//количество пострадавших
+				if ($dblb) {
+					$hurts = $dblb->query("SELECT count(vg_id) cnt
+											from 
+												ports 
+												join devices using (device_id) 
+											where 
+												device_name='$broken[ip]' 
+												and vg_id is not null;");
+					$hurts = $hurts->fetch()['cnt'];
+				} else $hurts = 0;
+				$special_hurts = $dbspd->query("SELECT count(port_id) cnt
+												from spd_devices_ports ports
+												join spd_specials_points specials using (port_id)
+												where 
+												dev_id=$dev_id
+												and ports.closedate is null
+												AND specials.closedate IS null;");
+				$special_hurts = $special_hurts->fetch()['cnt'];
+			} else {
+				$device_addr = $broken['name'];
+			}
+
+
+			// градиентный переход от серого к красному
+			switch (true) {
+				case ($broken['event_sec'] < 1800):
+					$color = 'DBDBDB';
+					break; // полчасика
+				case ($broken['event_sec'] < 7200):
+					$color = 'D6F6FF';
+					break; // пару часиков
+				case ($broken['event_sec'] < 21600):
+					$color = 'FFF6A5';
+					break; // шесть
+				case ($broken['event_sec'] < 43200):
+					$color = 'FFDC89';
+					break; // двенадцать
+				case ($broken['event_sec'] < 64800):
+					$color = 'FFB689';
+					break; // восемнадцать
+				case ($broken['event_sec'] < 86400):
+					$color = 'FF9999';
+					break; // более суток
+				default:
+					$color = 'FF8989';
+			}
+
+			// $is_important = $dbspd->query("SELECT * 
+			// 									from spd_group_links 
+			// 								where 
+			// 									group_id in (7,32,39,40,41)
+			// 									and dev_id=$dev_id  
+			// 									and closedate is null;");
+			
+
+
+			$result[] = array(
+				'dev_id' => $dev_id,
+				//'is_important' => ($is_important->rowCount() > 0) ? true : false,
+				'ip' => $broken['ip'],
+				'hostname' => $device_data['hostname'],
+				'addr' => $device_addr,
+				'last_comment_date' => $comment_date,
+				'last_comment_text' => $comment_text,
+				'event_time' => format_time_diff($broken['event_sec']),
+				'color' => $color,
+				'hurts' => $hurts,
+				'special_hurts' => $special_hurts,
+				'event_sec' => $broken['event_sec']
+			);
+		} else {
+
+			switch (true) {
+				case ($broken['event_sec'] < 1800):
+					$color = 'DBDBDB';
+					break; // полчасика
+				case ($broken['event_sec'] < 7200):
+					$color = 'D6F6FF';
+					break; // пару часиков
+				case ($broken['event_sec'] < 21600):
+					$color = 'FFF6A5';
+					break; // шесть
+				case ($broken['event_sec'] < 43200):
+					$color = 'FFDC89';
+					break; // двенадцать
+				case ($broken['event_sec'] < 64800):
+					$color = 'FFB689';
+					break; // восемнадцать
+				case ($broken['event_sec'] < 86400):
+					$color = 'FF9999';
+					break; // более суток
+				default:
+					$color = 'FF8989';
+			}
+
+			$result[] = array(
+				'host' => $broken['name'],
+				'hostid' => $broken['hostid'],
+				'ip' => $broken['ip'],
+				'color' => $color,
+				'event_time' => format_time_diff($broken['event_sec']),
+				'event_sec' => $broken['event_sec']
+			);
+		}
+	}
+	if (count($result) > 0) return $result;
+	return false;
+}
+
+function getNonICMPTriggers()
+{
+	// функция выбирает все триггеры, кроме ICMP.
+	global $dbnewzab;
+	$template_id = "23,24";
+	$triggers = $dbnewzab->query("
+                               SELECT hostid,
+                                        lastchange,
+                                        EXTRACT(EPOCH FROM now()) - lastchange AS event_sec,
+                                    	h.host AS ip,
+                                        h.name AS name ,
+                                        t.description,
+                                        t.priority
+                                FROM triggers t
+                                JOIN functions f USING (triggerid)
+                                JOIN items i1 USING (itemid)
+                                JOIN interface i2 USING (hostid)
+                                JOIN hosts h USING (hostid)
+                                WHERE value = 1
+                                AND (t.templateid != ALL (ARRAY[$template_id]) OR t.templateid IS NULL)
+                                AND t.status = 0
+                                AND h.status = 0
+                                GROUP BY t.triggerid, t.lastchange, hostid, h.name, h.host
+                                ORDER BY t.priority DESC, lastchange
+
+								");
+	$result = array();
+
+	while ($trigger = $triggers->fetch()) {
+
+		$dev_id = false;
+		if ($dev_id = deviceGetByIP($trigger['ip'])) {
+			$device_data = deviceGetData($dev_id);
+			$device_addr = deviceGetAddr($dev_id);
+		}
+
+		// градиентный переход от серого к красному
+		// красим по критичности аварии
+		switch ($trigger['priority']) {
+			case 0:
+				$color = 'DBDBDB';
+				break;
+			case 1:
+				$color = 'D6F6FF';
+				break;
+			case 2:
+				$color = 'FFF6A5';
+				break;
+			case 3:
+				$color = 'FFB689';
+				break;
+			case 4:
+				$color = 'FF9999';
+				break;
+			case 5:
+				$color = 'FF0000';
+				break;
+			default:
+				$color = 'FF0000';
+		}
+
+		if ($dev_id) {
+			$result[] = array(
+				'dev_id' => $dev_id,
+				'hostid' => $trigger['hostid'],
+				'trigger' => $trigger['description'],
+				'ip' => $trigger['ip'],
+				'hostname' => $device_data['hostname'],
+				'addr' => $device_addr,
+				'event_time' => format_time_diff($trigger['event_sec']),
+				'color' => $color
+			);
+		} else {
+			switch ($trigger['priority']) {
+				case 0:
+					$color = 'DBDBDB';
+					break;
+				case 1:
+					$color = 'D6F6FF';
+					break;
+				case 2:
+					$color = 'FFF6A5';
+					break;
+				case 3:
+					$color = 'FFB689';
+					break;
+				case 4:
+					$color = 'FF9999';
+					break;
+				case 5:
+					$color = 'FF0000';
+					break;
+				default:
+					$color = 'FF0000';
+			}
+			$result[] = array(
+				'host' => $trigger['name'],
+				'trigger' => $trigger['description'],
+				'ip' => $trigger['ip'],
+				'color' => $color,
+				'event_time' => format_time_diff($trigger['event_sec'])
+			);
+		}
+	}
+
+	if (count($result) > 0) return $result;
+	return false;
+}
+
+function getZabbixCurrentState($zabbix_id)
+{
+
+	try{
+	global $dbnewzab;
+	#/ICMP Ping для нового Zabbix на Docker 14251 и 196042 (FiberHome)
+	$sth = $dbnewzab->query(" 
+
+SELECT 
+    CASE value
+        WHEN '0' THEN 'Работает'
+        WHEN '1' THEN 'Не работает' ELSE 'Неизвестно' END AS state,
+    value,
+    hostid AS hostid,
+    TO_TIMESTAMP(lastchange) AS begin_time,
+    (EXTRACT(EPOCH FROM now()) - lastchange) AS event_sec
+FROM
+    triggers
+    JOIN functions USING (triggerid)
+    JOIN items USING (itemid)
+WHERE
+	 hostid = $zabbix_id  
+    AND triggers.templateid IN (23);
+		");
+
+//	echo(gettype($value));
+	#*/
+	#$sth = $dbzab->prepare("select 'Неизвестно' state, 6 value, sysdate() begin_time, 0 event_sec;"); // упрощенный запрос чтобы не тормозил web-интерфейс в случае массовых аварий
+	if ($value = $sth->fetch()) {
+		$value['event_time'] = format_time_diff($value['event_sec']);
+		return $value;
+	}
+	return false;
+	} catch (Exception $e) {
+		echo "<script>console.log('Debug Objects: " . $e  . "' );</script>";
+	}	
+}
+
+function getICMPTriggersNonFiltred()
+{
+	global $dbnewzab, $dbspd, $dblb;
+	$template_id = "23"; // Get from trigger table 
+
+	$brokens = $dbnewzab->query("
+                                (SELECT lastchange,
+                                EXTRACT(EPOCH FROM now()) - lastchange AS event_sec,
+                                hosts.hostid,
+                                ip,
+                                hosts.name AS name
+                FROM triggers
+                JOIN functions USING (triggerid)
+                JOIN items USING (itemid)
+                JOIN interface USING (hostid)
+                JOIN hosts USING (hostid)
+                WHERE value = 1
+                   AND triggers.templateid = ANY(ARRAY[$template_id])
+                   AND hosts.status = 0
+                GROUP BY ip, lastchange, hosts.hostid, hosts.name
+                ORDER BY lastchange)
+		");
+	$result = array();
+	//$count_brokens = count($brokens->fetchAll());
+	$brokens = $brokens->fetchAll();
+	// while ($broken = $brokens->fetch()) {
+	foreach ($brokens as $broken) {
+		//if ($broken['ip'] && count($brokens)<100) {
+		if ($dev_id = deviceGetByIP($broken['ip'])) {
+			if (count($brokens) < 175) {
+				$device_data = deviceGetData($dev_id);
+				$device_addr = deviceGetAddr($dev_id);
+				$comment_text = '';
+				$comment_date = '';
+				$color = 'cc0000';
+
+				// подсмотреть последний коммент
+				$comment = $dbspd->query("select 
+											date_format(insdate, '%d.%m.%Y %H:%i:') f_insdate, comment 
+										from spd_comments 
+										where 
+											comment_type = 'device' 
+											and obj_id=$dev_id 
+											and UNIX_TIMESTAMP(insdate) > $broken[lastchange] 
+										order by insdate desc limit 1;");
+				list($comment_date, $comment_text) = $comment->fetch();
+				//количество пострадавших
+				if ($dblb) {
+					$hurts = $dblb->query("SELECT count(vg_id) cnt
+											from 
+												ports 
+												join devices using (device_id) 
+											where 
+												device_name='$broken[ip]' 
+												and vg_id is not null;");
+					$hurts = $hurts->fetch()['cnt'];
+				} else $hurts = 0;
+				$special_hurts = $dbspd->query("SELECT count(port_id) cnt
+												from spd_devices_ports ports
+												join spd_specials_points specials using (port_id)
+												where 
+												dev_id=$dev_id
+												and ports.closedate is null
+												AND specials.closedate IS null;");
+				$special_hurts = $special_hurts->fetch()['cnt'];
+			} else {
+				$device_addr = $broken['name'];
+			}
+
+
+			// градиентный переход от серого к красному
+			switch (true) {
+				case ($broken['event_sec'] < 1800):
+					$color = 'DBDBDB';
+					break; // полчасика
+				case ($broken['event_sec'] < 7200):
+					$color = 'D6F6FF';
+					break; // пару часиков
+				case ($broken['event_sec'] < 21600):
+					$color = 'FFF6A5';
+					break; // шесть
+				case ($broken['event_sec'] < 43200):
+					$color = 'FFDC89';
+					break; // двенадцать
+				case ($broken['event_sec'] < 64800):
+					$color = 'FFB689';
+					break; // восемнадцать
+				case ($broken['event_sec'] < 86400):
+					$color = 'FF9999';
+					break; // более суток
+				default:
+					$color = 'FF8989';
+			}
+
+			// $is_important = $dbspd->query("SELECT * 
+			// 									from spd_group_links 
+			// 								where 
+			// 									group_id in (7,32,39,40,41)
+			// 									and dev_id=$dev_id  
+			// 									and closedate is null;");
+			
+
+
+			$result[] = array(
+				'dev_id' => $dev_id,
+				//'is_important' => ($is_important->rowCount() > 0) ? true : false,
+				'ip' => $broken['ip'],
+				'hostname' => $device_data['hostname'],
+				'addr' => $device_addr,
+				'last_comment_date' => $comment_date,
+				'last_comment_text' => $comment_text,
+				'event_time' => format_time_diff($broken['event_sec']),
+				'color' => $color,
+				'hurts' => $hurts,
+				'special_hurts' => $special_hurts,
+				'event_sec' => $broken['event_sec']
+			);
+		} else {
+
+			switch (true) {
+				case ($broken['event_sec'] < 1800):
+					$color = 'DBDBDB';
+					break; // полчасика
+				case ($broken['event_sec'] < 7200):
+					$color = 'D6F6FF';
+					break; // пару часиков
+				case ($broken['event_sec'] < 21600):
+					$color = 'FFF6A5';
+					break; // шесть
+				case ($broken['event_sec'] < 43200):
+					$color = 'FFDC89';
+					break; // двенадцать
+				case ($broken['event_sec'] < 64800):
+					$color = 'FFB689';
+					break; // восемнадцать
+				case ($broken['event_sec'] < 86400):
+					$color = 'FF9999';
+					break; // более суток
+				default:
+					$color = 'FF8989';
+			}
+
+			$result[] = array(
+				'host' => $broken['name'],
+				'hostid' => $broken['hostid'],
+				'ip' => $broken['ip'],
+				'color' => $color,
+				'event_time' => format_time_diff($broken['event_sec']),
+				'event_sec' => $broken['event_sec']
+			);
+		}
+	}
+	if (count($result) > 0) return $result;
+	return $result;
+}
+
+
+
+//echo "<script>console.log('Debug Objects: " . (getCurrentState(6696)) . "' );</script>";
+//echo "<script>console.log('Debug Objects: " . getZabbixIdForDevice(6696) . "' );</script>";
+//echo "<script>console.log('Debug Objects: " .  . "' );</script>";
+
+
