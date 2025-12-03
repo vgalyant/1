@@ -1,0 +1,444 @@
+Current configuration:
+!
+!
+sysname 10.220.191.138
+!
+!
+!
+!
+dba-profile profile-id 0 profile-name dba-profile_0
+  type1 fix 256
+  commit
+ exit
+dba-profile profile-id 1 profile-name dba-profile_1
+  type4 max 1244160
+  commit
+ exit
+dba-profile profile-id 2 profile-name dba-profile_2
+  type2 assure 2048
+  commit
+ exit
+dba-profile profile-id 3 profile-name dba-profile_3
+  type2 assure 20480
+  commit
+ exit
+dba-profile profile-id 4 profile-name dba-profile_4
+  type3 assure 30720 max 102400
+  commit
+ exit
+dba-profile profile-id 10 profile-name VOIP
+  type1 fix 1024
+  commit
+ exit
+dba-profile profile-id 20 profile-name IPTV
+  type3 assure 8192 max 16384
+  commit
+ exit
+dba-profile profile-id 30 profile-name INET
+  type4 max 1000000
+  commit
+ exit
+!
+!
+!
+ont-line-profile gpon profile-id 0 profile-name line-profile_0
+ #tcont 0 dba-profile-id 0
+ #tcont 1 dba-profile-id 1
+  #gem add 1 tcont 1
+   #gem mapping 1 1 vlan 1
+   gemport 1 vlan 1 user-vlan 1 tag-action transparent
+  commit
+ exit
+ont-line-profile gpon profile-id 10 profile-name APAS
+  omcc encrypt enable
+ #tcont 0 dba-profile-id 0
+  tcont 1 dba-profile-id 10
+   gem add 1 tcont 1
+    gem mapping 1 1 vlan 10
+  tcont 2 dba-profile-id 20
+   gem add 2 tcont 2
+    gem mapping 2 1 vlan 20
+  tcont 3 dba-profile-id 30
+   gem add 3 tcont 3
+    gem mapping 3 1 vlan 30
+  commit
+ exit
+!
+ont-srv-profile gpon profile-id 0 profile-name srv-profile_0
+  #ont-port eth adaptive pots adaptive catv adaptive
+  port vlan eth 1 transparent
+  port vlan eth 2 transparent
+  port vlan eth 3 transparent
+  port vlan eth 4 transparent
+  port vlan eth 5 transparent
+  port vlan eth 6 transparent
+  port vlan eth 7 transparent
+  port vlan eth 8 transparent
+  port vlan eth 9 transparent
+  port vlan eth 10 transparent
+  port vlan eth 11 transparent
+  port vlan eth 12 transparent
+  port vlan eth 13 transparent
+  port vlan eth 14 transparent
+  port vlan eth 15 transparent
+  port vlan eth 16 transparent
+  port vlan eth 17 transparent
+  port vlan eth 18 transparent
+  port vlan eth 19 transparent
+  port vlan eth 20 transparent
+  port vlan eth 21 transparent
+  port vlan eth 22 transparent
+  port vlan eth 23 transparent
+  port vlan eth 24 transparent
+  commit
+ exit
+ont-srv-profile gpon profile-id 10 profile-name APAS
+  ont-port eth adaptive pots adaptive catv adaptive
+  multicast mode snooping
+  port vlan iphost 30
+  port vlan iphost 10
+  ipconfig 0 dhcp vlan 30 priority 0
+  ipconfig 1 dhcp vlan 10 priority 0
+  port multicast iphost concern
+  commit
+ exit
+!
+!
+!
+ont-tr069-profile gpon profile-id 1 profile-name MTS
+  tr069-management ip-index 0
+  commit
+ exit
+ont-sipagent-profile gpon profile-id 0 profile-name sipagent-profile_0
+  commit
+  exit
+ont-digitmap-profile gpon profile-id 0 profile-name digitmap-profile_0
+  commit
+ exit
+ont-siprightflag-profile gpon profile-id 0 profile-name sipright-profile_0
+  commit
+ exit
+ont-pots-profile gpon profile-id 0 profile-name pots-profile_0
+  commit
+ exit
+ont mult-srv-profile gpon profile-id 0 profile-name default-mult-srv-profile
+ ont-line-profile profile-id 0
+ ont-srv-profile profile-id 0
+ commit
+exit
+!
+!
+!
+!
+vlan 1137
+         vlan description 1137 Management
+vlan 1,1212,4040
+!
+!
+!
+!
+!
+!
+#dot1p-mapping-table table-id 0 table-name default-dot1p-mapping-table
+#dscp-mapping-table table-id 0 table-name default-dscp-mapping-table
+qos-scheduler-profile profile-id 1 profile-name SP+WRR
+   queue-scheduler 0 mode wfq weight 10
+   queue-scheduler 1 mode wfq weight 20
+   queue-scheduler 2 mode wfq weight 30
+   queue-scheduler 3 mode wfq weight 40
+   queue-scheduler 4 mode wfq weight 60
+   queue-scheduler 5 mode pq
+   queue-scheduler 6 mode pq
+   queue-scheduler 7 mode pq
+  commit
+ exit
+qos-scheduler-profile profile-id 2 profile-name qos-scheduler-profile_2
+   queue-scheduler 0 mode pq
+   queue-scheduler 1 mode pq
+   queue-scheduler 2 mode pq
+   queue-scheduler 3 mode pq
+   queue-scheduler 4 mode pq
+   queue-scheduler 5 mode pq
+   queue-scheduler 6 mode pq
+   queue-scheduler 7 mode pq
+  commit
+ exit
+qos-scheduler-profile profile-id 3 profile-name qos-scheduler-profile_3
+   queue-scheduler 0 mode pq
+   queue-scheduler 1 mode pq
+   queue-scheduler 2 mode pq
+   queue-scheduler 3 mode pq
+   queue-scheduler 4 mode pq
+   queue-scheduler 5 mode pq
+   queue-scheduler 6 mode pq
+   queue-scheduler 7 mode pq
+  commit
+ exit
+!
+!
+!
+lldp enable
+lldp port pon 0/0 1 disable
+lldp port pon 0/0 2 disable
+lldp port pon 0/0 3 disable
+lldp port pon 0/0 4 disable
+lldp port pon 0/0 5 disable
+lldp port pon 0/0 6 disable
+lldp port pon 0/0 7 disable
+lldp port pon 0/0 8 disable
+lldp port pon 0/0 9 disable
+lldp port pon 0/0 10 disable
+lldp port pon 0/0 11 disable
+lldp port pon 0/0 12 disable
+lldp port pon 0/0 13 disable
+lldp port pon 0/0 14 disable
+lldp port pon 0/0 15 disable
+lldp port pon 0/0 16 disable
+no lldp port ge 0/0 1 tlv-enable dot1-tlv all
+no lldp port ge 0/0 2 tlv-enable dot1-tlv all
+no lldp port ge 0/0 3 tlv-enable dot1-tlv all
+no lldp port ge 0/0 4 tlv-enable dot1-tlv all
+no lldp port xge 0/0 1 tlv-enable dot1-tlv all
+no lldp port xge 0/0 2 tlv-enable dot1-tlv all
+!
+!
+radius
+exit
+!
+!
+tacacs+
+ authentication server-id 0 ip 10.147.37.252 share-key */*NG\_DMM_QDLDL\ port 49
+ authentication config-server id 0 timeout 1
+ authorization server-id 0 ip 10.147.37.252 share-key */*NG\_DMM_QDLDL\ port 49
+ authorization config-server id 0 timeout 1
+exit
+!
+user name root password *#*$)&'()*++p,V01H3 privilege-level 15
+user name admin password *#*$)&'()*++p,V01H3 privilege-level 2
+user name operator password *#*$)&'()*++p,V01H3 privilege-level 1
+user name guest password *#*$w&'w)P[D-./0|g` privilege-level 0
+!
+aaa
+ domain default
+  aaa_protocol tacacs+
+  authtype acsii
+  tacacs+ authentication server-id 0
+  tacacs+ authorize server-id 0
+  exit
+!
+!
+interface mgmt
+ ip address 192.168.1.100 24
+exit
+!
+!
+!
+!
+!
+!
+!
+!
+!
+interface gpon 0/0
+ traffic-suppress 1 broadcast pps 100
+ traffic-suppress 1 multicast pps 100
+ traffic-suppress 1 unicast pps 100
+ ont authmode 1 manual
+ traffic-suppress 2 broadcast pps 100
+ traffic-suppress 2 multicast pps 100
+ traffic-suppress 2 unicast pps 100
+ ont authmode 2 manual
+ traffic-suppress 3 broadcast pps 100
+ traffic-suppress 3 multicast pps 100
+ traffic-suppress 3 unicast pps 100
+ ont authmode 3 manual
+ traffic-suppress 4 broadcast pps 100
+ traffic-suppress 4 multicast pps 100
+ traffic-suppress 4 unicast pps 100
+ ont authmode 4 manual
+ traffic-suppress 5 broadcast pps 100
+ traffic-suppress 5 multicast pps 100
+ traffic-suppress 5 unicast pps 100
+ ont authmode 5 manual
+ traffic-suppress 6 broadcast pps 100
+ traffic-suppress 6 multicast pps 100
+ traffic-suppress 6 unicast pps 100
+ ont authmode 6 manual
+ traffic-suppress 7 broadcast pps 100
+ traffic-suppress 7 multicast pps 100
+ traffic-suppress 7 unicast pps 100
+ ont authmode 7 manual
+ traffic-suppress 8 broadcast pps 100
+ traffic-suppress 8 multicast pps 100
+ traffic-suppress 8 unicast pps 100
+ ont authmode 8 manual
+ traffic-suppress 9 broadcast pps 100
+ traffic-suppress 9 multicast pps 100
+ traffic-suppress 9 unicast pps 100
+ ont authmode 9 manual
+ traffic-suppress 10 broadcast pps 100
+ traffic-suppress 10 multicast pps 100
+ traffic-suppress 10 unicast pps 100
+ ont authmode 10 manual
+ traffic-suppress 11 broadcast pps 100
+ traffic-suppress 11 multicast pps 100
+ traffic-suppress 11 unicast pps 100
+ ont authmode 11 manual
+ traffic-suppress 12 broadcast pps 100
+ traffic-suppress 12 multicast pps 100
+ traffic-suppress 12 unicast pps 100
+ ont authmode 12 manual
+ traffic-suppress 13 broadcast pps 100
+ traffic-suppress 13 multicast pps 100
+ traffic-suppress 13 unicast pps 100
+ ont authmode 13 manual
+ traffic-suppress 14 broadcast pps 100
+ traffic-suppress 14 multicast pps 100
+ traffic-suppress 14 unicast pps 100
+ ont authmode 14 manual
+ traffic-suppress 15 broadcast pps 100
+ traffic-suppress 15 multicast pps 100
+ traffic-suppress 15 unicast pps 100
+ ont authmode 15 manual
+ traffic-suppress 16 broadcast pps 100
+ traffic-suppress 16 multicast pps 100
+ traffic-suppress 16 unicast pps 100
+ ont authmode 16 manual
+ port 1 trust-mode dot1p
+ port 1 qos-scheduler-profile profile-id 1
+ port 2 trust-mode dot1p
+ port 3 trust-mode dot1p
+ ont add 4 1 sn-auth "48575443074659AA" ont-lineprofile-id 10 ont-srvprofile-id 10
+  ont ipconfig 4 1 ip-index 0 dhcp vlan 30 priority 0
+  ont internet-config 4 1 ip-index 0
+  ont ipconfig 4 1 ip-index 0 nat enable
+  ont ipconfig 4 1 ip-index 0 multicast-forward 4040
+  ont ipconfig 4 1 ip-index 0 binding eth 1-4 wlan 1,2
+  ont tr069-profile 4 1 ont-tr069profile-id 1
+ port 4 trust-mode dot1p
+ port 5 trust-mode dot1p
+ port 6 trust-mode dot1p
+ port 7 trust-mode dot1p
+ port 8 trust-mode dot1p
+ port 9 trust-mode dot1p
+ port 10 trust-mode dot1p
+ port 11 trust-mode dot1p
+ port 12 trust-mode dot1p
+ port 13 trust-mode dot1p
+ port 14 trust-mode dot1p
+ port 15 trust-mode dot1p
+ port 16 trust-mode dot1p
+exit
+!
+interface ge 0/0
+ port-desc 1 description [MBH]
+ auto-neg 1 disable
+ vlan mode 1 trunk
+ vlan trunk 1 1137,1212,4040
+ port 1 trust-mode both
+ auto-neg 2 disable
+ port 2 trust-mode dot1p
+ port 3 trust-mode dot1p
+ port 4 trust-mode dot1p
+exit
+!
+interface xge 0/0
+ port-desc 1 description [MBH]
+ vlan mode 1 trunk
+ vlan trunk 1 1137,1212,4040
+ port 1 trust-mode both
+ port 2 trust-mode dot1p
+exit
+!
+!
+service-port 1 vlan 1212 gpon 0/0 port 4 ont 1 gemport 3 multi-service user-vlan 30 tag-action translate-and-add inner-vlan 1000 inner-priority 0
+!
+!
+!
+!
+igmp mode proxy
+igmp source-ip 1.1.1.1
+igmp user add user-index 1 pon 0/0/4 ont 1 no-auth max-program 32
+multicast-vlan 4040
+  igmp router-port ge 0/0/1
+  igmp program add program-index 1 batch-ip 239.255.4.0 239.255.7.255
+  igmp program add program-index 2 batch-ip 239.255.40.0 239.255.40.255
+  igmp program add program-index 3 batch-ip 239.10.27.0 239.10.27.255
+ exit
+!
+# DHCP snooping config
+dhcp-snooping enable
+dhcp-snooping limit-rate 10 port pon 0/0 1
+dhcp-snooping limit-rate 10 port pon 0/0 2
+dhcp-snooping limit-rate 10 port pon 0/0 3
+dhcp-snooping limit-rate 10 port pon 0/0 4
+dhcp-snooping limit-rate 10 port pon 0/0 5
+dhcp-snooping limit-rate 10 port pon 0/0 6
+dhcp-snooping limit-rate 10 port pon 0/0 7
+dhcp-snooping limit-rate 10 port pon 0/0 8
+dhcp-snooping limit-rate 10 port pon 0/0 9
+dhcp-snooping limit-rate 10 port pon 0/0 10
+dhcp-snooping limit-rate 10 port pon 0/0 11
+dhcp-snooping limit-rate 10 port pon 0/0 12
+dhcp-snooping limit-rate 10 port pon 0/0 13
+dhcp-snooping limit-rate 10 port pon 0/0 14
+dhcp-snooping limit-rate 10 port pon 0/0 15
+dhcp-snooping limit-rate 10 port pon 0/0 16
+dhcp-snooping trust port ge 0/0 1
+!
+# DHCP security-table config
+!
+# DHCP ipsg config
+!
+!
+!
+interface vlanif 1137
+ ip address 10.220.191.138 24
+exit
+!
+!
+!
+!
+ip route 0.0.0.0/0 10.220.191.254
+!
+!
+!
+!
+!
+!
+timezone gmt+ 10:00
+ntp-service refclock-master server 10.147.37.247
+ntp-service refclock-master server-bak 10.147.37.250
+ntp-service client enable
+!
+
+!
+!
+snmp-agent sys-info sysname 10.220.191.138
+snmp-agent sys-info description 10.220.191.138
+snmp-agent sys-info location koms71
+no snmp-agent community id 1
+snmp-agent community id 1 name community1 read */*GQ\_idx_ed|q
+no snmp-agent community id 2
+snmp-agent community id 2 name community2 write */*gq|_idx_ed|q_x}
+!
+user login terminal-type console authentication-method local-aaa
+user login terminal-type telnet authentication-method local-aaa
+user login terminal-type ssh authentication-method local-aaa
+!
+!
+service telnet enable
+service ssh enable
+service http disable
+service https disable
+service snmp enable
+service telnet add rule range 10.220.0.0 to 10.220.0.255 permit
+service telnet add rule range 10.220.191.0 to 10.220.191.255 permit
+service telnet add rule range 10.147.0.0 to 10.147.255.255 permit
+service snmp add rule range 10.220.0.0 to 10.220.0.255 permit
+service snmp add rule range 10.220.191.0 to 10.220.191.255 permit
+service snmp add rule range 10.147.0.0 to 10.147.255.255 permit
+!
+!
+end
+!
